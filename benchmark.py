@@ -34,8 +34,8 @@ for inventory_level in inventory_levels:
 
     # Constraint 4: Matching only if there is an edge - assuming all items are always available for simplicity
     # If there are specific conditions where an item is not available, l_ti should be defined accordingly
-    # l_ti = np.ones((T, n))  # Example definition if you have specific availability data
-    # constraints += [X <= l_ti]
+    l_ti = np.ones((T, n))  
+    constraints += [X <= l_ti]
 
     # Define the optimization problem
     prob = cp.Problem(cp.Maximize(revenue), constraints)
