@@ -1,53 +1,49 @@
-import pulp
+import cvxpy as cp
 import numpy as np
 
-# Configuration
-N = 5  # Number of products
-M = 5  # Number of customer types
+# Parameters
+n = 5  # Number of products
 T = 300  # Number of periods
+prices = np.linspace(15, 30, n)  # Prices of products
+inventory_levels = [1, 5, 20]  # Inventory levels
+probabilities = np.array([1 / (20 - i) for i in range(1, 6)])  # Geometric distribution parameters
 
-# Inventory scenarios
-inventory_levels = {'scarce': 1, 'moderate': 5, 'abundant': 20}
-inventories = {level: [inventory_levels[level]] * N for level in inventory_levels}
+# Prepare survival probabilities for the geometric distribution (product availability over time)
+survival_probabilities = np.array([(1 - probabilities[i]) ** np.arange(T) for i in range(n)])
 
-# Prices
-prices = np.linspace(15, 30, N)
+# Each inventory level simulation
+for inventory_level in inventory_levels:
+    # Decision variable: X[t, i] is now continuous between 0 and 1
+    X = cp.Variable((T, n), nonneg=True)
 
-# Usage time parameters: Geometric distribution parameters between 0.05 and 0.07
-# 1/(20-i) ensures that product type i has pi = 1/(20-i), giving longer expected usage time to more expensive products
-usage_parameters = [1/(20 - i) for i in range(N)]  # Adjusted to provide increasing availability time for more expensive products
+    # Objective function: Maximize expected total revenue
+    revenue = cp.sum(cp.multiply(X, prices.reshape(1, n)))
 
-# Customer arrival probabilities
-customer_probabilities = [1/M] * M  # Uniform distribution for simplicity
+    # Constraints
+    constraints = []
 
-# Create the LP model
-model = pulp.LpProblem("Dynamic_Assortment_Optimization", pulp.LpMaximize)
+    # Constraint 1: The sum of probabilities for matching items in each time period cannot exceed 1
+    constraints += [cp.sum(X, axis=1) <= 1]
 
-# Decision variables: Probability of selling product i to customer type m at time t
-X = {(t, i, m): pulp.LpVariable(f"X_{t}_{i}_{m}", lowBound=0, upBound=1, cat='Continuous') 
-     for t in range(T) for i in range(N) for m in range(M)}
+    # Constraint 2: Cumulative expected matching for each item should not exceed its maximum capacity
+    for i in range(n):
+        constraints += [cp.sum(cp.multiply(X[:, i], survival_probabilities[i])) <= inventory_level]
 
-# Objective Function: Maximize total expected revenue
-model += pulp.lpSum([prices[i] * X[t, i, m] * customer_probabilities[m] for t in range(T) for i in range(N) for m in range(M)])
+    # Constraint 3: X[t, i] must be between 0 and 1
+    constraints += [X <= 1]
 
-# Constraints
-# Inventory constraints for each product under each inventory scenario
-for level in inventories:
-    for i in range(N):
-        model += pulp.lpSum([X[t, i, m] * (1 - usage_parameters[i]**(t - s)) 
-                             for t in range(T) for m in range(M) for s in range(t)]) <= inventories[level][i], f"Inventory_{level}_limit_for_product_{i}"
+    # Constraint 4: Matching only if there is an edge - assuming all items are always available for simplicity
+    # If there are specific conditions where an item is not available, l_ti should be defined accordingly
+    # l_ti = np.ones((T, n))  # Example definition if you have specific availability data
+    # constraints += [X <= l_ti]
 
-# Constraint to ensure sales probabilities respect geometric distribution constraints over time
-for i in range(N):
-    for t in range(1, T):
-        for m in range(M):
-            model += X[t, i, m] <= usage_parameters[i] * X[t-1, i, m], f"Usage_time_adjustment_{t}_{i}_{m}"
+    # Define the optimization problem
+    prob = cp.Problem(cp.Maximize(revenue), constraints)
 
-# Solve the model (example for 'moderate' inventory level)
-model.solve()
+    # Solve the problem
+    prob.solve()
 
-# Output results
-print("Optimized Revenue under Moderate Inventory:", pulp.value(model.objective))
-for v in model.variables():
-    if v.varValue > 0:
-        print(v.name, "=", v.varValue)
+    # Output results
+    print(f"Inventory level {inventory_level}: Expected Max Revenue = ${prob.value:.2f}")
+    print("Expected matched items matrix:")
+    print(X.value)
